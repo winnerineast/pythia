@@ -25,10 +25,13 @@ in the following way:
                - type: custom
                - params: {}
 """
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
+from torch.nn.utils.rnn import pack_padded_sequence
 
 from pythia.common.registry import registry
 
@@ -61,6 +64,7 @@ class Losses(nn.Module):
         losses: List containing instanttions of each loss
                                    passed in config
     """
+
     def __init__(self, loss_list):
         super().__init__()
         self.losses = []
@@ -85,9 +89,11 @@ class Losses(nn.Module):
         output = {}
         if not hasattr(sample_list, "targets"):
             if not self._evalai_inference:
-                warnings.warn("Sample list has not field 'targets', are you "
-                              "sure that your ImDB has labels? you may have "
-                              "wanted to run with --evalai_inference 1")
+                warnings.warn(
+                    "Sample list has not field 'targets', are you "
+                    "sure that your ImDB has labels? you may have "
+                    "wanted to run with --evalai_inference 1"
+                )
             return output
 
         for loss in self.losses:
@@ -113,6 +119,7 @@ class PythiaLoss(nn.Module):
         Since, ``PythiaLoss`` is used by the ``Losses`` class, end user
         doesn't need to worry about it.
     """
+
     def __init__(self, params={}):
         super().__init__()
         self.writer = registry.get("writer")
@@ -157,6 +164,7 @@ class LogitBinaryCrossEntropy(nn.Module):
     Attention:
         `Key`: logit_bce
     """
+
     def __init__(self):
         super().__init__()
 
@@ -201,10 +209,50 @@ class BinaryCrossEntropyLoss(nn.Module):
         return loss * targets.size(1)
 
 
+@registry.register_loss("caption_cross_entropy")
+class CaptionCrossEntropyLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, sample_list, model_output):
+        """Calculates and returns the cross entropy loss for captions.
+
+        Args:
+            sample_list (SampleList): SampleList containing `targets` attribute.
+            model_output (Dict): Model output containing `scores` attribute.
+
+        Returns:
+            torch.FloatTensor: Float value for loss.
+
+        """
+        scores = model_output["scores"]
+        targets = sample_list["targets"]
+
+        # If no captions(test dataset) then assume decode length to be uniform
+        if hasattr(sample_list, "caption_len"):
+            caption_lengths, _ = sample_list.caption_len.sort(dim=0, descending=True)
+            decode_lengths = (caption_lengths - 1).tolist()
+        else:
+            decode_lengths = [targets.size(1)] * targets.size(0)
+        if torch.__version__ >= "1.1":
+            scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+            targets = pack_padded_sequence(
+                targets, decode_lengths, batch_first=True
+            ).data
+        else:
+            scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
+            targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+
+        loss = F.cross_entropy(scores, targets)
+
+        return loss
+
+
 @registry.register_loss("nll_loss")
 class NLLLoss(nn.Module):
     """Negative log likelikehood loss.
     """
+
     def __init__(self):
         super().__init__()
 
@@ -260,6 +308,7 @@ class MultiLoss(nn.Module):
             params: {}
 
     """
+
     def __init__(self, params):
         super().__init__()
         self.losses = []
@@ -299,6 +348,7 @@ class AttentionSupervisionLoss(nn.Module):
     """Loss for attention supervision. Used in case you want to make attentions
     similar to some particular values.
     """
+
     def __init__(self):
         super().__init__()
         self.loss_fn = lambda *args, **kwargs: nn.functional.binary_cross_entropy(

@@ -12,6 +12,7 @@ Import the global registry object using
 Various decorators for registry different kind of classes with unique keys
 
 - Register a task: ``@registry.register_task``
+- Register a trainer: ``@registry.register_trainer``
 - Register a dataset builder: ``@registry.register_builder``
 - Register a metric: ``@registry.register_metric``
 - Register a loss: ``@registry.register_loss``
@@ -36,6 +37,7 @@ class Registry:
         # Similar to the task_name_mapping above except that this
         # one is used to keep a mapping for dataset to its builder class.
         # Use "register_builder" decorator to mapping a builder
+        "trainer_name_mapping": {},
         "builder_name_mapping": {},
         "model_name_mapping": {},
         "metric_name_mapping": {},
@@ -64,14 +66,39 @@ class Registry:
                 ...
 
         """
+
         def wrap(task_cls):
             from pythia.tasks.base_task import BaseTask
 
-            assert issubclass(task_cls, BaseTask), \
-                   "All task must inherit BaseTask class"
+            assert issubclass(
+                task_cls, BaseTask
+            ), "All task must inherit BaseTask class"
             cls.mapping["task_name_mapping"][name] = task_cls
             return task_cls
 
+        return wrap
+
+    @classmethod
+    def register_trainer(cls, name):
+        r"""Register a trainer to registry with key 'name'
+
+        Args:
+            name: Key with which the trainer will be registered.
+
+        Usage::
+
+            from pythia.common.registry import registry
+            from pythia.trainers.custom_trainer import CustomTrainer
+
+
+            @registry.register_trainer("custom_trainer")
+            class CustomTrainer():
+                ...
+
+        """
+        def wrap(trainer_cls):
+            cls.mapping["trainer_name_mapping"][name] = trainer_cls
+            return trainer_cls
         return wrap
 
     @classmethod
@@ -96,8 +123,9 @@ class Registry:
         def wrap(builder_cls):
             from pythia.tasks.base_dataset_builder import BaseDatasetBuilder
 
-            assert issubclass(builder_cls, BaseDatasetBuilder), \
-                   "All builders must inherit BaseDatasetBuilder class"
+            assert issubclass(
+                builder_cls, BaseDatasetBuilder
+            ), "All builders must inherit BaseDatasetBuilder class"
             cls.mapping["builder_name_mapping"][name] = builder_cls
             return builder_cls
 
@@ -121,10 +149,13 @@ class Registry:
                 ...
 
         """
+
         def wrap(func):
             from pythia.modules.metrics import BaseMetric
-            assert issubclass(func, BaseMetric), \
-                   "All Metric must inherit BaseMetric class"
+
+            assert issubclass(
+                func, BaseMetric
+            ), "All Metric must inherit BaseMetric class"
             cls.mapping["metric_name_mapping"][name] = func
             return func
 
@@ -147,11 +178,13 @@ class Registry:
                 ...
 
         """
+
         def wrap(func):
             from torch import nn
 
-            assert issubclass(func, nn.Module), \
-                   "All loss must inherit torch.nn.Module class"
+            assert issubclass(
+                func, nn.Module
+            ), "All loss must inherit torch.nn.Module class"
             cls.mapping["loss_name_mapping"][name] = func
             return func
 
@@ -173,11 +206,13 @@ class Registry:
             class Pythia(BaseModel):
                 ...
         """
+
         def wrap(func):
             from pythia.models.base_model import BaseModel
 
-            assert issubclass(func, BaseModel), \
-                   "All models must inherit BaseModel class"
+            assert issubclass(
+                func, BaseModel
+            ), "All models must inherit BaseModel class"
             cls.mapping["model_name_mapping"][name] = func
             return func
 
@@ -200,11 +235,13 @@ class Registry:
                 ...
 
         """
+
         def wrap(func):
             from pythia.tasks.processors import BaseProcessor
 
-            assert issubclass(func, BaseProcessor), \
-                   "All Processor classes must inherit BaseProcessor class"
+            assert issubclass(
+                func, BaseProcessor
+            ), "All Processor classes must inherit BaseProcessor class"
             cls.mapping["processor_name_mapping"][name] = func
             return func
 
@@ -252,6 +289,10 @@ class Registry:
     @classmethod
     def get_task_class(cls, name):
         return cls.mapping["task_name_mapping"].get(name, None)
+
+    @classmethod
+    def get_trainer_class(cls, name):
+        return cls.mapping["trainer_name_mapping"].get(name, None)
 
     @classmethod
     def get_builder_class(cls, name):
@@ -318,7 +359,6 @@ class Registry:
         return value
 
     @classmethod
-
     def unregister(cls, name):
         r"""Remove an item from registry with key 'name'
 

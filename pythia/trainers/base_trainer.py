@@ -11,26 +11,22 @@ from pythia.common.meter import Meter
 from pythia.common.registry import registry
 from pythia.common.report import Report
 from pythia.common.task_loader import TaskLoader
+from pythia.utils.build_utils import build_model, build_optimizer
 from pythia.utils.checkpoint import Checkpoint
-from pythia.utils.configuration import Configuration
 from pythia.utils.distributed_utils import (broadcast_scalar, is_main_process,
                                             reduce_dict, synchronize)
 from pythia.utils.early_stopping import EarlyStopping
-from pythia.utils.flags import flags
-from pythia.utils.general import (clip_gradients, dict_to_string,
-                                  lr_lambda_update)
+from pythia.utils.general import clip_gradients, lr_lambda_update
 from pythia.utils.logger import Logger
-from pythia.utils.build_utils import build_model, build_optimizer
 from pythia.utils.timer import Timer
 
 
-class Trainer:
-    def __init__(self, args, *rest, **kwargs):
-        self.args = args
-        self.profiler = Timer()
+@registry.register_trainer('base_trainer')
+class BaseTrainer:
+    def __init__(self, config):
+        self.config = config
 
     def load(self):
-        self.load_config()
         self._init_process_group()
 
         self.run_type = self.config.training_parameters.get("run_type", "train")
@@ -39,6 +35,7 @@ class Trainer:
         self.writer = Logger(self.config)
         registry.register("writer", self.writer)
 
+        self.configuration = registry.get("configuration")
         self.configuration.pretty_print()
 
         self.config_based_setup()
@@ -56,7 +53,7 @@ class Trainer:
         if self.local_rank is not None and training_parameters.distributed:
             if not torch.distributed.is_nccl_available():
                 raise RuntimeError(
-                    "Unable to initialize process group: " "NCCL is not available"
+                    "Unable to initialize process group: NCCL is not available"
                 )
             torch.distributed.init_process_group(backend="nccl")
             synchronize()
@@ -69,25 +66,6 @@ class Trainer:
             self.device = torch.device("cuda", self.local_rank)
 
         registry.register("current_device", self.device)
-
-    def load_config(self):
-        # TODO: Review configuration update once again
-        # (remember clip_gradients case)
-        self.configuration = Configuration(self.args.config)
-
-        # Update with the config override if passed
-        self.configuration.override_with_cmd_config(self.args.config_override)
-
-        # Now, update with opts args that were passed
-        self.configuration.override_with_cmd_opts(self.args.opts)
-
-        # Finally, update with args that were specifically passed
-        # as arguments
-        self.configuration.update_with_args(self.args)
-        self.configuration.freeze()
-
-        self.config = self.configuration.get_config()
-        registry.register("config", self.config)
 
     def load_task(self):
         self.writer.write("Loading tasks and data", "info")
@@ -128,11 +106,11 @@ class Trainer:
 
         if "cuda" in str(self.config.training_parameters.device):
             rank = self.local_rank if self.local_rank is not None else 0
-            self.writer.write(
-                "CUDA Device {} is: {}".format(
-                    rank, torch.cuda.get_device_name(self.local_rank)
-                )
+            device_info = "CUDA Device {} is: {}".format(
+                rank, torch.cuda.get_device_name(self.local_rank)
             )
+
+            self.writer.write(device_info, log_all=True)
 
         self.model = self.model.to(self.device)
 
@@ -151,7 +129,7 @@ class Trainer:
             and distributed is True
         ):
             self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model, device_ids=[self.local_rank], output_device=self.local_rank
+                self.model, device_ids=[self.local_rank]
             )
 
     def load_optimizer(self):
@@ -212,7 +190,6 @@ class Trainer:
         if "train" not in self.run_type:
             self.inference()
             return
-
 
         should_break = False
 
@@ -351,14 +328,16 @@ class Trainer:
             extra=extra,
             prefix=report.dataset_name,
         )
-        self._try_full_validation()
+
+        should_break = self._try_full_validation()
 
         return should_break
 
     def _try_full_validation(self, force=False):
+        should_break = False
+
         if self.current_iteration % self.snapshot_interval == 0 or force:
-            self.writer.write("Evaluation time. Running on full "
-                              "validation set...")
+            self.writer.write("Evaluation time. Running on full validation set...")
             # Validation and Early stopping
             # Create a new meter for this case
             report, meter = self.evaluate(self.val_loader)
@@ -382,6 +361,8 @@ class Trainer:
             if stop is True:
                 self.writer.write("Early stopping activated")
                 should_break = True
+
+        return should_break
 
     def evaluate(self, loader, use_tqdm=False, single_batch=False):
         meter = Meter()

@@ -64,6 +64,7 @@ class Metrics:
                                         specifies name and parameters of the
                                         metrics used.
     """
+
     def __init__(self, metric_list):
         if not isinstance(metric_list, list):
             metrics_list = [metric_list]
@@ -75,10 +76,10 @@ class Metrics:
         metrics = {}
         for metric in metric_list:
             params = {}
-            if isinstance(metric, collections.Mapping):
+            if isinstance(metric, collections.abc.Mapping):
                 if not hasattr(metric, "type"):
                     raise ValueError(
-                        "Metric {} needs to have 'type' " "attribute".format(metric)
+                        "Metric {} needs to have 'type' attribute".format(metric)
                     )
                 metric = metric.type
                 params = getattr(metric, "params", {})
@@ -134,6 +135,7 @@ class BaseMetric:
         name (str): Name of the metric.
 
     """
+
     def __init__(self, name, *args, **kwargs):
         self.name = name
 
@@ -153,8 +155,9 @@ class BaseMetric:
 
         """
         # Override in your child class
-        raise NotImplementedError("'calculate' must be implemented in the "
-                                  "child class")
+        raise NotImplementedError(
+            "'calculate' must be implemented in the child class"
+        )
 
     def __call__(self, *args, **kwargs):
         return self.calculate(*args, **kwargs)
@@ -170,6 +173,7 @@ class Accuracy(BaseMetric):
 
     **Key:** ``accuracy``
     """
+
     def __init__(self):
         super().__init__("accuracy")
 
@@ -198,6 +202,59 @@ class Accuracy(BaseMetric):
         return value
 
 
+@registry.register_metric("caption_bleu4")
+class CaptionBleu4Metric(BaseMetric):
+    """Metric for calculating caption accuracy using BLEU4 Score.
+
+    **Key:** ``caption_bleu4``
+    """
+
+    import nltk.translate.bleu_score as bleu_score
+
+    def __init__(self):
+        super().__init__("caption_bleu4")
+        self.caption_processor = registry.get("coco_caption_processor")
+
+    def calculate(self, sample_list, model_output, *args, **kwargs):
+        """Calculate accuracy and return it back.
+
+        Args:
+            sample_list (SampleList): SampleList provided by DataLoader for
+                                current iteration
+            model_output (Dict): Dict returned by model.
+
+        Returns:
+            torch.FloatTensor: bleu4 score.
+
+        """
+        # Create reference and hypotheses captions.
+        references = []
+        hypotheses = []
+
+        # References
+        targets = sample_list.answers
+        for j, p in enumerate(targets):
+            img_captions = [
+                self.caption_processor(c)["tokens"] for c in targets[j].tolist()
+            ]
+            references.append(img_captions)
+
+        # Hypotheses
+        scores = torch.max(model_output["scores"], dim=-1)[1]
+        scores = scores.tolist()
+        predictions = []
+        for j, p in enumerate(scores):
+            caption = self.caption_processor(scores[j])["tokens"]
+            predictions.append(caption)
+        hypotheses.extend(predictions)
+
+        assert len(references) == len(hypotheses)
+
+        bleu4 = self.bleu_score.corpus_bleu(references, hypotheses)
+
+        return targets.new_tensor(bleu4, dtype=torch.float)
+
+
 @registry.register_metric("vqa_accuracy")
 class VQAAccuracy(BaseMetric):
     """
@@ -207,6 +264,7 @@ class VQAAccuracy(BaseMetric):
 
     .. _here: https://visualqa.org/evaluation.html
     """
+
     def __init__(self):
         super().__init__("vqa_accuracy")
 
@@ -292,6 +350,7 @@ class RecallAt1(RecallAtK):
 
     **Key**: ``r@1``.
     """
+
     def __init__(self):
         super().__init__("r@1")
 
@@ -318,6 +377,7 @@ class RecallAt5(RecallAtK):
 
     **Key**: ``r@5``.
     """
+
     def __init__(self):
         super().__init__("r@5")
 
@@ -344,6 +404,7 @@ class RecallAt10(RecallAtK):
 
     **Key**: ``r@10``.
     """
+
     def __init__(self):
         super().__init__("r@10")
 
@@ -370,6 +431,7 @@ class MeanRank(RecallAtK):
 
     **Key**: ``mean_r``.
     """
+
     def __init__(self):
         super().__init__("mean_r")
 
@@ -396,6 +458,7 @@ class MeanReciprocalRank(RecallAtK):
 
     **Key**: ``mean_rr``.
     """
+
     def __init__(self):
         super().__init__("mean_rr")
 

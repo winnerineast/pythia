@@ -3,8 +3,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import os.path
 import sys
-import setuptools
 
+import setuptools
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "pythia"))
 
@@ -39,5 +39,5 @@ if __name__ == "__main__":
         author=AUTHOR,
         license=LICENSE,
         setup_requires=["pytest-runner"],
-        tests_require=["pytest"],
+        tests_require=["flake8", "pytest"],
     )

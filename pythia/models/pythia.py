@@ -3,14 +3,13 @@ import torch
 from torch import nn
 
 from pythia.common.registry import registry
+from pythia.models.base_model import BaseModel
 from pythia.modules.embeddings import (ImageEmbedding, PreExtractedEmbedding,
                                        TextEmbedding)
 from pythia.modules.encoders import ImageEncoder
 from pythia.modules.layers import (ClassifierLayer, ModalCombineLayer,
                                    ReLUWithWeightNormFC)
 from pythia.utils.configuration import ConfigNode
-
-from .base_model import BaseModel
 
 
 @registry.register_model("pythia")
@@ -199,11 +198,14 @@ class Pythia(BaseModel):
         return text_embeddding_total
 
     def process_feature_embedding(
-        self, attr, sample_list, text_embedding_total, extra=[]
+        self, attr, sample_list, text_embedding_total, extra=[], batch_size_t=None
     ):
         feature_embeddings = []
         feature_attentions = []
         features = []
+        batch_size_t = (
+            sample_list.get_batch_size() if batch_size_t is None else batch_size_t
+        )
 
         # Convert list of keys to the actual values
         extra = sample_list.get_fields(extra)
@@ -219,6 +221,7 @@ class Pythia(BaseModel):
             if feature is None:
                 break
             feature_idx += 1
+            feature = feature[:batch_size_t]
             features.append(feature)
 
         feature_encoders = getattr(self, attr + "_feature_encoders")
@@ -235,6 +238,8 @@ class Pythia(BaseModel):
             feature_info = getattr(sample_list, "{}_info_{:d}".format(attr, i), {})
             # For Pythia, we need max_features to mask attention
             feature_dim = getattr(feature_info, "max_features", None)
+            if feature_dim is not None:
+                feature_dim = feature_dim[:batch_size_t]
 
             # Attribute in which encoders are saved, for "image" it
             # will be "image_feature_encoders", other example is
